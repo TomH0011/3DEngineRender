@@ -47,7 +47,8 @@ public class DemoViewer {
                 g2.fillRect(0, 0, getWidth(), getHeight());
 
                 // Move origin to center
-                g2.translate(getWidth() / 2, getHeight() / 2);
+                // potent issue here?????,
+                g2.translate(0, 0);
 
                 // Get slider values as radians
                 double heading = Math.toRadians(headingSlider.getValue());
@@ -81,16 +82,42 @@ public class DemoViewer {
                     path.closePath();
 
                     g2.setColor(t.color);
-                    g2.draw(path);
+                    // Draws the wired frame
+//                    g2.draw(path);
                 }
 
                 BufferedImage img =
                         new BufferedImage(getWidth(), getHeight(), BufferedImage.TYPE_INT_ARGB);
 
+                // Initialise the zBuffer to calculate and keep track of pixel depth
+                double[] zBuffer = new double[img.getWidth() * img.getHeight()];
+                for (int q = 0; q < zBuffer.length; q++) {
+                    zBuffer[q] = Double.NEGATIVE_INFINITY;
+                }
+
                 for (Triangle t : tris) {
                     Vertex v1 = transform.transform(t.v1);
                     Vertex v2 = transform.transform(t.v2);
                     Vertex v3 = transform.transform(t.v3);
+
+                    Vertex ab = new Vertex(v2.x - v1.x, v2.y - v1.y, v2.z - v1.z);
+                    Vertex ac = new Vertex(v3.x - v1.x, v3.y - v1.y, v3.z - v1.z);
+
+                    // calculations needed to calculate angle between light source and normal to surface
+                    Vertex norm = new Vertex(
+                            ab.y * ac.z - ab.z * ac.y,
+                            ab.z * ac.x - ab.x * ac.z,
+                            ab.x * ac.y - ab.y * ac.x
+                    );
+
+                    double normalLength =
+                            Math.sqrt(norm.x * norm.x + norm.y * norm.y + norm.z * norm.z);
+                    norm.x /= normalLength;
+                    norm.y /= normalLength;
+                    norm.z /= normalLength;
+
+                    // angle between light and normal to triangle
+                    double angleCos = Math.abs(norm.z);
 
                     // since we are not using Graphics2D anymore,
                     // we have to do translation manually
@@ -112,6 +139,7 @@ public class DemoViewer {
                     double triangleArea =
                             (v1.y - v3.y) * (v2.x - v3.x) + (v2.y - v3.y) * (v3.x - v1.x);
 
+                    // Convert to barycentric co-ordinates b1, b2 and b3
                     for (int y = minY; y <= maxY; y++) {
                         for (int x = minX; x <= maxX; x++) {
                             double b1 =
@@ -120,12 +148,22 @@ public class DemoViewer {
                                     ((y - v1.y) * (v3.x - v1.x) + (v3.y - v1.y) * (v1.x - x)) / triangleArea;
                             double b3 =
                                     ((y - v2.y) * (v1.x - v2.x) + (v1.y - v2.y) * (v2.x - x)) / triangleArea;
-                            if (b1 >= 0 && b1 <= 1 && b2 >= 0 && b2 <= 1 && b3 >= 0 && b3 <= 1) {
-                                img.setRGB(x, y, t.color.getRGB());
+                            if (b1 >= 0 && b2 >= 0 && b3 >= 0) {  // already guaranteed they sum to 1
+                                // Interpolate z-depth
+                                double depth = b1 * v1.z + b2 * v2.z + b3 * v3.z;
+
+                                int zIndex = y * img.getWidth() + x;
+
+                                if (zBuffer[zIndex] < depth) {
+                                    zBuffer[zIndex] = depth;
+
+                                    Color shadedColor = Matrix3.getShade(t.color, angleCos);
+                                    img.setRGB(x, y, shadedColor.getRGB());
+                                }
                             }
+
                         }
                     }
-
                 }
 
                 g2.drawImage(img, 0, 0, null);
@@ -191,6 +229,18 @@ public class DemoViewer {
                     in.x * values[1] + in.y * values[4] + in.z * values[7],
                     in.x * values[2] + in.y * values[5] + in.z * values[8]
             );
+        }
+
+        public static Color getShade(Color color, double shade) {
+            double redLinear = Math.pow(color.getRed(), 2.4) * shade;
+            double greenLinear = Math.pow(color.getGreen(), 2.4) * shade;
+            double blueLinear = Math.pow(color.getBlue(), 2.4) * shade;
+
+            int red = (int) Math.pow(redLinear, 1/2.4);
+            int green = (int) Math.pow(greenLinear, 1/2.4);
+            int blue = (int) Math.pow(blueLinear, 1/2.4);
+
+            return new Color(red, green, blue);
         }
     }
 }
